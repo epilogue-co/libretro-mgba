@@ -64,6 +64,7 @@ static retro_log_printf_t logCallback;
 static retro_set_rumble_state_t rumbleCallback;
 static retro_sensor_get_input_t sensorGetCallback;
 static retro_set_sensor_state_t sensorStateCallback;
+static retro_save_updated_callback_t saveUpdatedCallback;
 
 static bool libretro_supports_bitmasks = false;
 
@@ -2142,6 +2143,12 @@ bool retro_load_game(const struct retro_game_info* game) {
 		}
 	}
 #endif
+
+  if (environCallback(RETRO_ENVIRONMENT_SET_SAVE_UPDATED_CALLBACK, &saveUpdatedCallback)) {
+    struct mCoreCallbacks callbacks = {0};
+    callbacks.savedataUpdated = saveUpdatedCallback;
+    core->addCoreCallbacks(core, &callbacks);
+  }
 
 	return true;
 }
