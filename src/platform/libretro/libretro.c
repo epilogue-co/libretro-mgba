@@ -1272,6 +1272,7 @@ static void _doDeferredSetup(void) {
 		save->close(save);
 	}
 	stream.audioRateChanged = _audioRateChanged;
+    _audioRateChanged(NULL, 0);
 	deferredSetup = false;
 }
 
