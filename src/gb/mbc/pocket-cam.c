@@ -9,6 +9,7 @@
 #include <mgba/internal/gb/gb.h>
 
 static void _GBPocketCamCapture(struct GBMemory*);
+static void _GBPocketCamCaptureRaw(struct GBMemory*);
 
 void _GBPocketCam(struct GB* gb, uint16_t address, uint8_t value) {
 	struct GBMemory* memory = &gb->memory;
@@ -50,7 +51,7 @@ void _GBPocketCam(struct GB* gb, uint16_t address, uint8_t value) {
 		if (address == 0 && value & 1) {
 			value &= 6; // TODO: Timing
 			gb->sramDirty |= mSAVEDATA_DIRT_NEW;
-			_GBPocketCamCapture(memory);
+			_GBPocketCamCaptureRaw(memory);
 		}
 		if (address < sizeof(memory->mbcState.pocketCam.registers)) {
 			memory->mbcState.pocketCam.registers[address] = value;
@@ -136,6 +137,53 @@ void _GBPocketCamCapture(struct GBMemory* memory) {
 			uint16_t existing;
 			LOAD_16LE(existing, coord + 0x100, memory->sram);
 			existing |= gray << (7 - (x & 7));
+			STORE_16LE(existing, coord + 0x100, memory->sram);
+		}
+	}
+}
+
+void _GBPocketCamCaptureRaw(struct GBMemory* memory) {
+	if (!memory->cam) {
+		return;
+	}
+	const void* img;
+	size_t stride;
+	enum mColorFormat fmt;
+	memory->cam->requestImage(memory->cam, &img, &stride, &fmt);
+	if (!img) {
+		return;
+	}
+	memset(&memory->sram[0x100], 0, GBCAM_HEIGHT * GBCAM_WIDTH / 4);
+	const uint32_t* pixels = (const uint32_t*) img;
+	for (size_t y = 0; y < GBCAM_HEIGHT; y++) {
+		for (size_t x = 0; x < GBCAM_WIDTH; x++) {
+			// Extract red channel (for XRGB8888, R==G==B in grayscale)
+			uint8_t gray = (pixels[y * stride + x] >> 16) & 0xFF;
+			uint16_t mapped;
+			// Map gray levels to mgba's 2-bit internal values:
+			//   0   -> 0x101 : represents black
+			//   85  -> 0x100 : represents dark gray
+			//   170 -> 0x001 : represents light gray
+			//   255 -> 0x000 : represents white
+			switch (gray) {
+			case 0:
+				mapped = 0x101;
+				break;
+			case 85:
+				mapped = 0x100;
+				break;
+			case 170:
+				mapped = 0x001;
+				break;
+			case 255:
+				mapped = 0;
+				break;
+			}
+			// Compute SRAM coordinate using mgba's tile layout
+			int coord = (((x >> 3) & 0xF) * 8 + (y & 7)) * 2 + ((y & ~7) * 0x20);
+			uint16_t existing;
+			LOAD_16LE(existing, coord + 0x100, memory->sram);
+			existing |= mapped << (7 - (x & 7));
 			STORE_16LE(existing, coord + 0x100, memory->sram);
 		}
 	}
