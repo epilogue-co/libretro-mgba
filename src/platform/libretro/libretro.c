@@ -1276,29 +1276,26 @@ static void _doDeferredSetup(void) {
 	// Here's that workaround, but really the API needs to be thrown out and rewritten.
 	struct VFile* save = VFileFromMemory(savedata, GBA_SIZE_FLASH1M);
 
-    /* need to defer resetting the core on start so drivers are initialized */
-    core->reset(core);
+  /* need to defer resetting the core on start so drivers are initialized */
+  core->reset(core);
 	_setupMaps(core);
 
 #ifdef M_CORE_GBA
-    // We'll preserve any existing hardware flags
-    if (core->platform(core) == mPLATFORM_GBA) {
-        struct GBA* gba = (struct GBA*) core->board;
-        if (gba) {
-            // Store original hardware flags
-            int originalDevices = gba->memory.hw.devices;
-            
-            // Apply any hardware overrides that might be needed
-            struct GBACartridgeOverride override = {0};
-            memcpy(override.id, &((struct GBACartridge*) gba->memory.rom)->id, 4);
-            if (GBAOverrideFind(NULL, &override)) {
-                GBAOverrideApply(gba, &override);
-            } else {
-                // If no override found, restore original flags
-                gba->memory.hw.devices = originalDevices;
-            }
+  // Re-apply hardware overrides after reset to ensure consistent state
+  if (core->platform(core) == mPLATFORM_GBA) {
+    struct GBA* gba = (struct GBA*) core->board;
+    if (gba) {
+      // Apply standard game overrides based on ROM ID
+      struct GBACartridgeOverride override = {0};
+      const struct GBACartridge* cart = (const struct GBACartridge*) gba->memory.rom;
+      if (cart) {
+        memcpy(override.id, &cart->id, 4);
+        if (GBAOverrideFind(NULL, &override)) {
+          GBAOverrideApply(gba, &override);
         }
+      }
     }
+  }
 #endif
 
 
@@ -2158,9 +2155,6 @@ bool retro_load_game(const struct retro_game_info* game) {
 	}
 #endif
 
-// Removing our custom RTC detection to avoid conflicts
-// with the normal override system
-
   if (environCallback(RETRO_ENVIRONMENT_SET_SAVE_UPDATED_CALLBACK, &saveUpdatedCallback)) {
     struct mCoreCallbacks callbacks = {0};
     callbacks.savedataUpdated = saveUpdatedCallback;
@@ -2311,19 +2305,23 @@ void* retro_get_memory_data(unsigned id) {
 		case mPLATFORM_GBA: {
 			struct GBA* gba = (struct GBA*) core->board;
             
-            // Check if this is a game that should have RTC
-            struct GBACartridgeOverride override = {0};
-            memcpy(override.id, &((struct GBACartridge*) gba->memory.rom)->id, 4);
-            if (GBAOverrideFind(NULL, &override) && (override.hardware & HW_RTC)) {
-                // If it should have RTC but the flag isn't set, set it
-                if (!(gba->memory.hw.devices & HW_RTC)) {
-                    GBAHardwareInitRTC(&gba->memory.hw);
-                }
-                return gba->memory.hw.rtc.time;
-            } else if (gba->memory.hw.devices & HW_RTC) {
-                // If the flag is already set, use it
+            // First check if RTC is already enabled
+            if (gba->memory.hw.devices & HW_RTC) {
                 return gba->memory.hw.rtc.time;
             }
+            
+            // If not, check if this game should have RTC according to our override database
+            struct GBACartridgeOverride override = {0};
+            const struct GBACartridge* cart = (const struct GBACartridge*) gba->memory.rom;
+            if (cart) {
+                memcpy(override.id, &cart->id, 4);
+                if (GBAOverrideFind(NULL, &override) && (override.hardware & HW_RTC)) {
+                    // Initialize RTC for this game
+                    GBAHardwareInitRTC(&gba->memory.hw);
+                    return gba->memory.hw.rtc.time;
+                }
+            }
+            return NULL; // No RTC for this game
 		}
 #endif
 #ifdef M_CORE_GB
@@ -2399,19 +2397,23 @@ size_t retro_get_memory_size(unsigned id) {
 		case mPLATFORM_GBA: {
 			struct GBA* gba = (struct GBA*) core->board;
             
-            // Check if this is a game that should have RTC
-            struct GBACartridgeOverride override = {0};
-            memcpy(override.id, &((struct GBACartridge*) gba->memory.rom)->id, 4);
-            if (GBAOverrideFind(NULL, &override) && (override.hardware & HW_RTC)) {
-                // If it should have RTC but the flag isn't set, set it
-                if (!(gba->memory.hw.devices & HW_RTC)) {
-                    GBAHardwareInitRTC(&gba->memory.hw);
-                }
-                return sizeof(gba->memory.hw.rtc.time);
-            } else if (gba->memory.hw.devices & HW_RTC) {
-                // If the flag is already set, use it
+            // First check if RTC is already enabled
+            if (gba->memory.hw.devices & HW_RTC) {
                 return sizeof(gba->memory.hw.rtc.time);
             }
+            
+            // If not, check if this game should have RTC according to our override database
+            struct GBACartridgeOverride override = {0};
+            const struct GBACartridge* cart = (const struct GBACartridge*) gba->memory.rom;
+            if (cart) {
+                memcpy(override.id, &cart->id, 4);
+                if (GBAOverrideFind(NULL, &override) && (override.hardware & HW_RTC)) {
+                    // Initialize RTC for this game
+                    GBAHardwareInitRTC(&gba->memory.hw);
+                    return sizeof(gba->memory.hw.rtc.time);
+                }
+            }
+            return 0; // No RTC for this game
 		}
 #endif
 #ifdef M_CORE_GB
