@@ -2078,8 +2078,11 @@ bool retro_load_game(const struct retro_game_info* game) {
 	core->loadROM(core, rom);
 	
 #ifdef M_CORE_GBA
-	// Early initialization of hardware features based on game overrides
-	// This ensures features like RTC are available before deferred setup
+    // The key issue is that in libretro, the standard automatic override 
+    // application that would happen during reset is delayed because of 
+    // the deferred reset mechanism. This means there's a window between 
+    // ROM loading and the deferred reset where memory functions might 
+    // be called, but overrides haven't been applied yet.
 	if (core->platform(core) == mPLATFORM_GBA) {
 		GBAOverrideApplyDefaults(core->board, NULL);
 	}
