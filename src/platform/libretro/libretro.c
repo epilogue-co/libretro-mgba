@@ -24,6 +24,7 @@
 #include <mgba/gba/core.h>
 #include <mgba/gba/interface.h>
 #include <mgba/internal/gba/gba.h>
+#include <mgba/internal/gba/overrides.h>
 #endif
 #include <mgba-util/memory.h>
 #include <mgba-util/vfs.h>
@@ -1279,6 +1280,28 @@ static void _doDeferredSetup(void) {
     core->reset(core);
 	_setupMaps(core);
 
+#ifdef M_CORE_GBA
+    // We'll preserve any existing hardware flags
+    if (core->platform(core) == mPLATFORM_GBA) {
+        struct GBA* gba = (struct GBA*) core->board;
+        if (gba) {
+            // Store original hardware flags
+            int originalDevices = gba->memory.hw.devices;
+            
+            // Apply any hardware overrides that might be needed
+            struct GBACartridgeOverride override = {0};
+            memcpy(override.id, &((struct GBACartridge*) gba->memory.rom)->id, 4);
+            if (GBAOverrideFind(NULL, &override)) {
+                GBAOverrideApply(gba, &override);
+            } else {
+                // If no override found, restore original flags
+                gba->memory.hw.devices = originalDevices;
+            }
+        }
+    }
+#endif
+
+
 #if defined(COLOR_16_BIT) && defined(COLOR_5_6_5)
 	_loadPostProcessingSettings();
 #endif
@@ -2017,7 +2040,7 @@ bool retro_load_game(const struct retro_game_info* game) {
 	}
 	mCoreInitConfig(core, NULL);
 	core->init(core);
-
+	
 #ifdef _3DS
 	outputBuffer = linearMemAlign(VIDEO_BUFF_SIZE, 0x80);
 #else
@@ -2134,6 +2157,9 @@ bool retro_load_game(const struct retro_game_info* game) {
 		}
 	}
 #endif
+
+// Removing our custom RTC detection to avoid conflicts
+// with the normal override system
 
   if (environCallback(RETRO_ENVIRONMENT_SET_SAVE_UPDATED_CALLBACK, &saveUpdatedCallback)) {
     struct mCoreCallbacks callbacks = {0};
@@ -2281,6 +2307,25 @@ void* retro_get_memory_data(unsigned id) {
 		return savedata;
 	case RETRO_MEMORY_RTC:
 		switch (core->platform(core)) {
+#ifdef M_CORE_GBA
+		case mPLATFORM_GBA: {
+			struct GBA* gba = (struct GBA*) core->board;
+            
+            // Check if this is a game that should have RTC
+            struct GBACartridgeOverride override = {0};
+            memcpy(override.id, &((struct GBACartridge*) gba->memory.rom)->id, 4);
+            if (GBAOverrideFind(NULL, &override) && (override.hardware & HW_RTC)) {
+                // If it should have RTC but the flag isn't set, set it
+                if (!(gba->memory.hw.devices & HW_RTC)) {
+                    GBAHardwareInitRTC(&gba->memory.hw);
+                }
+                return gba->memory.hw.rtc.time;
+            } else if (gba->memory.hw.devices & HW_RTC) {
+                // If the flag is already set, use it
+                return gba->memory.hw.rtc.time;
+            }
+		}
+#endif
 #ifdef M_CORE_GB
 		case mPLATFORM_GB:
 			switch (((struct GB*) core->board)->memory.mbcType) {
@@ -2350,6 +2395,25 @@ size_t retro_get_memory_size(unsigned id) {
 		break;
 	case RETRO_MEMORY_RTC:
 		switch (core->platform(core)) {
+#ifdef M_CORE_GBA
+		case mPLATFORM_GBA: {
+			struct GBA* gba = (struct GBA*) core->board;
+            
+            // Check if this is a game that should have RTC
+            struct GBACartridgeOverride override = {0};
+            memcpy(override.id, &((struct GBACartridge*) gba->memory.rom)->id, 4);
+            if (GBAOverrideFind(NULL, &override) && (override.hardware & HW_RTC)) {
+                // If it should have RTC but the flag isn't set, set it
+                if (!(gba->memory.hw.devices & HW_RTC)) {
+                    GBAHardwareInitRTC(&gba->memory.hw);
+                }
+                return sizeof(gba->memory.hw.rtc.time);
+            } else if (gba->memory.hw.devices & HW_RTC) {
+                // If the flag is already set, use it
+                return sizeof(gba->memory.hw.rtc.time);
+            }
+		}
+#endif
 #ifdef M_CORE_GB
 		case mPLATFORM_GB:
 			switch (((struct GB*) core->board)->memory.mbcType) {
