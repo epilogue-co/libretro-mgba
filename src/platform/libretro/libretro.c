@@ -1276,17 +1276,9 @@ static void _doDeferredSetup(void) {
 	// Here's that workaround, but really the API needs to be thrown out and rewritten.
 	struct VFile* save = VFileFromMemory(savedata, GBA_SIZE_FLASH1M);
 
-  /* need to defer resetting the core on start so drivers are initialized */
-  core->reset(core);
+    /* need to defer resetting the core on start so drivers are initialized */
+    core->reset(core);
 	_setupMaps(core);
-
-#ifdef M_CORE_GBA
-  // Re-apply hardware overrides after reset to ensure consistent state
-  if (core->platform(core) == mPLATFORM_GBA) {
-    GBAOverrideApplyDefaults(core->board, NULL);
-  }
-#endif
-
 
 #if defined(COLOR_16_BIT) && defined(COLOR_5_6_5)
 	_loadPostProcessingSettings();
@@ -2026,7 +2018,7 @@ bool retro_load_game(const struct retro_game_info* game) {
 	}
 	mCoreInitConfig(core, NULL);
 	core->init(core);
-	
+
 #ifdef _3DS
 	outputBuffer = linearMemAlign(VIDEO_BUFF_SIZE, 0x80);
 #else
