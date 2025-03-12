@@ -1281,19 +1281,12 @@ static void _doDeferredSetup(void) {
 	_setupMaps(core);
 
 #ifdef M_CORE_GBA
-  // Re-apply hardware overrides after reset to ensure consistent state
+  // Ensure hardware overrides are properly applied after reset
   if (core->platform(core) == mPLATFORM_GBA) {
     struct GBA* gba = (struct GBA*) core->board;
     if (gba) {
-      // Apply standard game overrides based on ROM ID
-      struct GBACartridgeOverride override = {0};
-      const struct GBACartridge* cart = (const struct GBACartridge*) gba->memory.rom;
-      if (cart) {
-        memcpy(override.id, &cart->id, 4);
-        if (GBAOverrideFind(NULL, &override)) {
-          GBAOverrideApply(gba, &override);
-        }
-      }
+      // Use the standard override detection and application
+      GBAOverrideApplyDefaults(gba, NULL);
     }
   }
 #endif
@@ -2310,7 +2303,7 @@ void* retro_get_memory_data(unsigned id) {
                 return gba->memory.hw.rtc.time;
             }
             
-            // If not, check if this game should have RTC according to our override database
+            // If not, check if this game should have RTC
             struct GBACartridgeOverride override = {0};
             const struct GBACartridge* cart = (const struct GBACartridge*) gba->memory.rom;
             if (cart) {
@@ -2402,7 +2395,7 @@ size_t retro_get_memory_size(unsigned id) {
                 return sizeof(gba->memory.hw.rtc.time);
             }
             
-            // If not, check if this game should have RTC according to our override database
+            // If not, check if this game should have RTC
             struct GBACartridgeOverride override = {0};
             const struct GBACartridge* cart = (const struct GBACartridge*) gba->memory.rom;
             if (cart) {
