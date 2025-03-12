@@ -1281,13 +1281,9 @@ static void _doDeferredSetup(void) {
 	_setupMaps(core);
 
 #ifdef M_CORE_GBA
-  // Ensure hardware overrides are properly applied after reset
+  // Re-apply hardware overrides after reset to ensure consistent state
   if (core->platform(core) == mPLATFORM_GBA) {
-    struct GBA* gba = (struct GBA*) core->board;
-    if (gba) {
-      // Use the standard override detection and application
-      GBAOverrideApplyDefaults(gba, NULL);
-    }
+    GBAOverrideApplyDefaults(core->board, NULL);
   }
 #endif
 
@@ -2090,21 +2086,10 @@ bool retro_load_game(const struct retro_game_info* game) {
 	core->loadROM(core, rom);
 	
 #ifdef M_CORE_GBA
-	// Early RTC initialization for games that need it
-	// This ensures RTC is available for memory queries that happen
-	// before the deferred setup
+	// Early initialization of hardware features based on game overrides
+	// This ensures features like RTC are available before deferred setup
 	if (core->platform(core) == mPLATFORM_GBA) {
-		struct GBA* gba = (struct GBA*) core->board;
-		if (gba) {
-			struct GBACartridgeOverride override = {0};
-			const struct GBACartridge* cart = (const struct GBACartridge*) gba->memory.rom;
-			if (cart) {
-				memcpy(override.id, &cart->id, 4);
-				if (GBAOverrideFind(NULL, &override) && (override.hardware & HW_RTC)) {
-					GBAHardwareInitRTC(&gba->memory.hw);
-				}
-			}
-		}
+		GBAOverrideApplyDefaults(core->board, NULL);
 	}
 #endif
 	
@@ -2315,10 +2300,9 @@ void* retro_get_memory_data(unsigned id) {
 	case RETRO_MEMORY_RTC:
 		switch (core->platform(core)) {
 #ifdef M_CORE_GBA
-		case mPLATFORM_GBA: {
-			struct GBA* gba = (struct GBA*) core->board;
-            return gba->memory.hw.devices & HW_RTC ? gba->memory.hw.rtc.time : NULL;
-		}
+		case mPLATFORM_GBA:
+			return ((struct GBA*) core->board)->memory.hw.devices & HW_RTC ? 
+				((struct GBA*) core->board)->memory.hw.rtc.time : NULL;
 #endif
 #ifdef M_CORE_GB
 		case mPLATFORM_GB:
@@ -2390,10 +2374,9 @@ size_t retro_get_memory_size(unsigned id) {
 	case RETRO_MEMORY_RTC:
 		switch (core->platform(core)) {
 #ifdef M_CORE_GBA
-		case mPLATFORM_GBA: {
-			struct GBA* gba = (struct GBA*) core->board;
-            return gba->memory.hw.devices & HW_RTC ? sizeof(gba->memory.hw.rtc.time) : 0;
-		}
+		case mPLATFORM_GBA:
+			return ((struct GBA*) core->board)->memory.hw.devices & HW_RTC ? 
+				sizeof(((struct GBA*) core->board)->memory.hw.rtc.time) : 0;
 #endif
 #ifdef M_CORE_GB
 		case mPLATFORM_GB:
