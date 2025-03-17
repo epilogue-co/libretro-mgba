@@ -100,6 +100,7 @@ static bool sensorsInitDone;
 static bool rumbleInitDone;
 static struct mRumbleIntegrator rumble;
 static struct GBALuminanceSource lux;
+static struct GBASavedataRTCBuffer rtcExchangeBuffer;
 static struct mRotationSource rotation;
 static bool tiltEnabled;
 static bool gyroEnabled;
@@ -325,6 +326,10 @@ static void _loadAudioLowPassFilterSettings(void) {
 	if (environCallback(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
 		audioLowPassRange = (strtol(var.value, NULL, 10) * 0x10000) / 100;
 	}
+}
+
+static uint8_t _unBCD(uint8_t byte) {
+    return (byte >> 4) * 10 + (byte & 0xF);
 }
 
 /* Video post processing */
@@ -1287,6 +1292,29 @@ static void _doDeferredSetup(void) {
 	if (!core->loadSave(core, save)) {
 		save->close(save);
 	}
+
+  if (core->platform(core) == mPLATFORM_GBA) {
+    struct GBA* gba = (struct GBA*)core->board;
+    if (gba->memory.hw.devices & HW_RTC) {
+      memcpy(gba->memory.hw.rtc.time, rtcExchangeBuffer.time, 7);
+      gba->memory.hw.rtc.control = rtcExchangeBuffer.control;
+      gba->memory.hw.rtc.lastLatch = rtcExchangeBuffer.lastLatch;
+
+      // As done in GBASavedataRTCRead
+      struct tm date;
+      date.tm_year = _unBCD(gba->memory.hw.rtc.time[0]) + 100;
+      date.tm_mon = _unBCD(gba->memory.hw.rtc.time[1]) - 1;
+      date.tm_mday = _unBCD(gba->memory.hw.rtc.time[2]);
+      date.tm_hour = _unBCD(gba->memory.hw.rtc.time[4]);
+      date.tm_min = _unBCD(gba->memory.hw.rtc.time[5]);
+      date.tm_sec = _unBCD(gba->memory.hw.rtc.time[6]);
+      date.tm_isdst = -1;
+
+      time_t rtcTime = mktime(&date);
+      gba->memory.hw.rtc.offset = gba->memory.hw.rtc.lastLatch - rtcTime;
+    }
+  }
+
 	deferredSetup = false;
 }
 
@@ -2297,7 +2325,7 @@ void* retro_get_memory_data(unsigned id) {
 #ifdef M_CORE_GBA
 		case mPLATFORM_GBA:
 			return ((struct GBA*) core->board)->memory.hw.devices & HW_RTC ? 
-				((struct GBA*) core->board)->memory.hw.rtc.time : NULL;
+				&rtcExchangeBuffer : NULL;
 #endif
 #ifdef M_CORE_GB
 		case mPLATFORM_GB:
@@ -2371,7 +2399,7 @@ size_t retro_get_memory_size(unsigned id) {
 #ifdef M_CORE_GBA
 		case mPLATFORM_GBA:
 			return ((struct GBA*) core->board)->memory.hw.devices & HW_RTC ? 
-				sizeof(((struct GBA*) core->board)->memory.hw.rtc.time) : 0;
+				sizeof(struct GBASavedataRTCBuffer) : 0;
 #endif
 #ifdef M_CORE_GB
 		case mPLATFORM_GB:
