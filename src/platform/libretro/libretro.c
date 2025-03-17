@@ -56,6 +56,8 @@ FS_Archive sdmcArchive;
 #define VIDEO_HEIGHT_MAX 224
 #define VIDEO_BUFF_SIZE  (VIDEO_WIDTH_MAX * VIDEO_HEIGHT_MAX * sizeof(mColor))
 
+#define RTC_UPDATE_FREQUENCY 60
+
 static retro_environment_t environCallback;
 static retro_video_refresh_t videoCallback;
 static retro_audio_sample_batch_t audioCallback;
@@ -101,6 +103,7 @@ static bool rumbleInitDone;
 static struct mRumbleIntegrator rumble;
 static struct GBALuminanceSource lux;
 static struct GBASavedataRTCBuffer rtcExchangeBuffer;
+static int rtcUpdateCounter = 0;
 static struct mRotationSource rotation;
 static bool tiltEnabled;
 static bool gyroEnabled;
@@ -1298,7 +1301,7 @@ static void _doDeferredSetup(void) {
     if (gba->memory.hw.devices & HW_RTC) {
       memcpy(gba->memory.hw.rtc.time, rtcExchangeBuffer.time, 7);
       gba->memory.hw.rtc.control = rtcExchangeBuffer.control;
-      gba->memory.hw.rtc.lastLatch = rtcExchangeBuffer.lastLatch;
+      LOAD_64LE(gba->memory.hw.rtc.lastLatch, 0, &rtcExchangeBuffer.lastLatch);
 
       // As done in GBASavedataRTCRead
       struct tm date;
@@ -1656,6 +1659,19 @@ void retro_run(void) {
 			}
 		}
 	}
+
+  rtcUpdateCounter++;
+  if (rtcUpdateCounter >= RTC_UPDATE_FREQUENCY) {
+    rtcUpdateCounter = 0;
+    if (core->platform(core) == mPLATFORM_GBA) {
+      struct GBA* gba = (struct GBA*)core->board;
+      if (gba->memory.hw.devices & HW_RTC) {
+          memcpy(rtcExchangeBuffer.time, gba->memory.hw.rtc.time, 7);
+          rtcExchangeBuffer.control = gba->memory.hw.rtc.control;
+          STORE_64LE(gba->memory.hw.rtc.lastLatch, 0, &rtcExchangeBuffer.lastLatch);
+      }
+    }
+  }
 
 	/* Check whether current frame should
 	 * be skipped */
