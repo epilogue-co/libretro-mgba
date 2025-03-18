@@ -1299,7 +1299,7 @@ static void _doDeferredSetup(void) {
   if (core->platform(core) == mPLATFORM_GBA) {
     struct GBA* gba = (struct GBA*)core->board;
     if (gba->memory.hw.devices & HW_RTC) {
-      memcpy(gba->memory.hw.rtc.time, rtcExchangeBuffer.time, 7);
+      memcpy(gba->memory.hw.rtc.time, rtcExchangeBuffer.time, sizeof(rtcExchangeBuffer.time));
       gba->memory.hw.rtc.control = rtcExchangeBuffer.control;
       LOAD_64LE(gba->memory.hw.rtc.lastLatch, 0, &rtcExchangeBuffer.lastLatch);
 
@@ -1666,7 +1666,7 @@ void retro_run(void) {
     if (core->platform(core) == mPLATFORM_GBA) {
       struct GBA* gba = (struct GBA*)core->board;
       if (gba->memory.hw.devices & HW_RTC) {
-          memcpy(rtcExchangeBuffer.time, gba->memory.hw.rtc.time, 7);
+          memcpy(rtcExchangeBuffer.time, gba->memory.hw.rtc.time, sizeof(rtcExchangeBuffer.time));
           rtcExchangeBuffer.control = gba->memory.hw.rtc.control;
           STORE_64LE(gba->memory.hw.rtc.lastLatch, 0, &rtcExchangeBuffer.lastLatch);
       }
