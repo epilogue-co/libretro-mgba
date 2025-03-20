@@ -24,6 +24,7 @@
 #include <mgba/gba/core.h>
 #include <mgba/gba/interface.h>
 #include <mgba/internal/gba/gba.h>
+#include <mgba/internal/gba/overrides.h>
 #endif
 #include <mgba-util/memory.h>
 #include <mgba-util/vfs.h>
@@ -54,6 +55,8 @@ FS_Archive sdmcArchive;
 #define VIDEO_WIDTH_MAX  256
 #define VIDEO_HEIGHT_MAX 224
 #define VIDEO_BUFF_SIZE  (VIDEO_WIDTH_MAX * VIDEO_HEIGHT_MAX * sizeof(mColor))
+
+#define RTC_UPDATE_FREQUENCY 60
 
 static retro_environment_t environCallback;
 static retro_video_refresh_t videoCallback;
@@ -99,6 +102,8 @@ static bool sensorsInitDone;
 static bool rumbleInitDone;
 static struct mRumbleIntegrator rumble;
 static struct GBALuminanceSource lux;
+static struct GBASavedataRTCBuffer rtcExchangeBuffer;
+static int rtcUpdateCounter = 0;
 static struct mRotationSource rotation;
 static bool tiltEnabled;
 static bool gyroEnabled;
@@ -324,6 +329,10 @@ static void _loadAudioLowPassFilterSettings(void) {
 	if (environCallback(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
 		audioLowPassRange = (strtol(var.value, NULL, 10) * 0x10000) / 100;
 	}
+}
+
+static uint8_t _unBCD(uint8_t byte) {
+    return (byte >> 4) * 10 + (byte & 0xF);
 }
 
 /* Video post processing */
@@ -1286,6 +1295,36 @@ static void _doDeferredSetup(void) {
 	if (!core->loadSave(core, save)) {
 		save->close(save);
 	}
+
+  // In the case the RTC exchange buffer is populated by the frontend in any field via
+  // the get_memory_data function, populate the RTC data in the core.
+  if (core->platform(core) == mPLATFORM_GBA) {
+    struct GBA* gba = (struct GBA*)core->board;
+    if (gba->memory.hw.devices & HW_RTC) {
+      struct GBASavedataRTCBuffer zeroBuffer;
+      memset(&zeroBuffer, 0, sizeof(zeroBuffer));
+
+      if (!(memcmp(&rtcExchangeBuffer, &zeroBuffer, sizeof(rtcExchangeBuffer)) == 0)) {
+        memcpy(gba->memory.hw.rtc.time, rtcExchangeBuffer.time, sizeof(rtcExchangeBuffer.time));
+        gba->memory.hw.rtc.control = rtcExchangeBuffer.control;
+        LOAD_64LE(gba->memory.hw.rtc.lastLatch, 0, &rtcExchangeBuffer.lastLatch);
+
+        // As done in GBASavedataRTCRead
+        struct tm date;
+        date.tm_year = _unBCD(gba->memory.hw.rtc.time[0]) + 100;
+        date.tm_mon = _unBCD(gba->memory.hw.rtc.time[1]) - 1;
+        date.tm_mday = _unBCD(gba->memory.hw.rtc.time[2]);
+        date.tm_hour = _unBCD(gba->memory.hw.rtc.time[4]);
+        date.tm_min = _unBCD(gba->memory.hw.rtc.time[5]);
+        date.tm_sec = _unBCD(gba->memory.hw.rtc.time[6]);
+        date.tm_isdst = -1;
+
+        time_t rtcTime = mktime(&date);
+        gba->memory.hw.rtc.offset = gba->memory.hw.rtc.lastLatch - rtcTime;
+      }
+    }
+  }
+
 	deferredSetup = false;
 }
 
@@ -1627,6 +1666,19 @@ void retro_run(void) {
 			}
 		}
 	}
+
+  rtcUpdateCounter++;
+  if (rtcUpdateCounter >= RTC_UPDATE_FREQUENCY) {
+    rtcUpdateCounter = 0;
+    if (core->platform(core) == mPLATFORM_GBA) {
+      struct GBA* gba = (struct GBA*)core->board;
+      if (gba->memory.hw.devices & HW_RTC) {
+          memcpy(rtcExchangeBuffer.time, gba->memory.hw.rtc.time, sizeof(rtcExchangeBuffer.time));
+          rtcExchangeBuffer.control = gba->memory.hw.rtc.control;
+          STORE_64LE(gba->memory.hw.rtc.lastLatch, 0, &rtcExchangeBuffer.lastLatch);
+      }
+    }
+  }
 
 	/* Check whether current frame should
 	 * be skipped */
@@ -2080,9 +2132,22 @@ bool retro_load_game(const struct retro_game_info* game) {
 
 	savedata = anonymousMemoryMap(GBA_SIZE_FLASH1M);
 	memset(savedata, 0xFF, GBA_SIZE_FLASH1M);
+  	memset(&rtcExchangeBuffer, 0x00, sizeof(rtcExchangeBuffer));
 
 	_reloadSettings();
 	core->loadROM(core, rom);
+
+#ifdef M_CORE_GBA
+    // The key issue is that in libretro, the standard automatic override
+    // application that would happen during reset is delayed because of
+    // the deferred reset mechanism. This means there's a window between
+    // ROM loading and the deferred reset where memory functions might
+    // be called, but overrides haven't been applied yet.
+	if (core->platform(core) == mPLATFORM_GBA) {
+		GBAOverrideApplyDefaults(core->board, NULL);
+	}
+#endif
+
 	deferredSetup = true;
 
 	const char* sysDir = 0;
@@ -2134,6 +2199,8 @@ bool retro_load_game(const struct retro_game_info* game) {
 	}
 #endif
 
+  	memset(&rtcExchangeBuffer, 0x00, sizeof(rtcExchangeBuffer));
+
 #ifdef ENABLE_VFS
 	if (core->opts.useBios && sysDir && biosName) {
 		snprintf(biosPath, sizeof(biosPath), "%s%s%s", sysDir, PATH_SEP, biosName);
@@ -2159,6 +2226,7 @@ void retro_unload_game(void) {
 	}
 	mCoreConfigDeinit(&core->config);
 	core->deinit(core);
+  	memset(&rtcExchangeBuffer, 0x00, sizeof(rtcExchangeBuffer));
 	mappedMemoryFree(data, dataSize);
 	data = 0;
 	mappedMemoryFree(savedata, GBA_SIZE_FLASH1M);
@@ -2290,6 +2358,11 @@ void* retro_get_memory_data(unsigned id) {
 		return savedata;
 	case RETRO_MEMORY_RTC:
 		switch (core->platform(core)) {
+#ifdef M_CORE_GBA
+		case mPLATFORM_GBA:
+			return ((struct GBA*) core->board)->memory.hw.devices & HW_RTC ?
+				&rtcExchangeBuffer : NULL;
+#endif
 #ifdef M_CORE_GB
 		case mPLATFORM_GB:
 			switch (((struct GB*) core->board)->memory.mbcType) {
@@ -2359,6 +2432,11 @@ size_t retro_get_memory_size(unsigned id) {
 		break;
 	case RETRO_MEMORY_RTC:
 		switch (core->platform(core)) {
+#ifdef M_CORE_GBA
+		case mPLATFORM_GBA:
+			return ((struct GBA*) core->board)->memory.hw.devices & HW_RTC ?
+				sizeof(struct GBASavedataRTCBuffer) : 0;
+#endif
 #ifdef M_CORE_GB
 		case mPLATFORM_GB:
 			switch (((struct GB*) core->board)->memory.mbcType) {
