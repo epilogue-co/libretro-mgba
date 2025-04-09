@@ -1638,18 +1638,20 @@ void retro_run(void) {
 		}
 	}
 
-  rtcUpdateCounter++;
-  if (rtcUpdateCounter >= RTC_UPDATE_FREQUENCY) {
-    rtcUpdateCounter = 0;
-    if (core->platform(core) == mPLATFORM_GBA) {
-      struct GBA* gba = (struct GBA*)core->board;
-      if (gba->memory.hw.devices & HW_RTC) {
-          memcpy(rtcExchangeBuffer.time, gba->memory.hw.rtc.time, sizeof(rtcExchangeBuffer.time));
-          rtcExchangeBuffer.control = gba->memory.hw.rtc.control;
-          STORE_64LE(gba->memory.hw.rtc.lastLatch, 0, &rtcExchangeBuffer.lastLatch);
-      }
-    }
-  }
+	rtcUpdateCounter++;
+	if (rtcUpdateCounter >= RTC_UPDATE_FREQUENCY) {
+		rtcUpdateCounter = 0;
+		if (core->platform(core) == mPLATFORM_GBA) {
+		  struct GBA* gba = (struct GBA*)core->board;
+		  if (gba->memory.hw.devices & HW_RTC) {
+			  if (memcmp(rtcExchangeBuffer.time, gba->memory.hw.rtc.time, sizeof(rtcExchangeBuffer.time)) != 0) {
+				  memcpy(rtcExchangeBuffer.time, gba->memory.hw.rtc.time, sizeof(rtcExchangeBuffer.time));
+			  }
+			  rtcExchangeBuffer.control = gba->memory.hw.rtc.control;
+			  STORE_64LE(gba->memory.hw.rtc.lastLatch, 0, &rtcExchangeBuffer.lastLatch);
+		  }
+		}
+	}
 
 	/* Check whether current frame should
 	 * be skipped */
