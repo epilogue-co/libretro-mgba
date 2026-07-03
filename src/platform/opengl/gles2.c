@@ -359,6 +359,9 @@ static void _drawShaderEx(struct mGLES2Context* context, struct mGLES2Shader* sh
 	}
 
 	glBindFramebuffer(GL_FRAMEBUFFER, shader->fbo);
+	if (!shader->fbo) {
+		glDrawBuffer(GL_BACK_LEFT);
+	}
 	if (shader->blend) {
 		glEnable(GL_BLEND);
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
