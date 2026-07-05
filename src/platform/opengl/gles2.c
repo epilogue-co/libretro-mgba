@@ -360,7 +360,13 @@ static void _drawShaderEx(struct mGLES2Context* context, struct mGLES2Shader* sh
 
 	glBindFramebuffer(GL_FRAMEBUFFER, shader->fbo);
 	if (!shader->fbo) {
-		glDrawBuffer(GL_BACK_LEFT);
+#ifdef GL_BACK_LEFT
+		// Desktop OpenGL
+		glDrawBuffers(1, (GLenum[]) { GL_BACK_LEFT });
+#else
+		// Actual OpenGL|ES
+		glDrawBuffers(1, (GLenum[]) { GL_BACK });
+#endif
 	}
 	if (shader->blend) {
 		glEnable(GL_BLEND);
