@@ -585,9 +585,21 @@ static size_t _GBACoreGetAudioBufferSize(struct mCore* core) {
 	return gba->audio.samples;
 }
 
-static void _GBACoreAddCoreCallbacks(struct mCore* core, struct mCoreCallbacks* coreCallbacks) {
+static void _GBACoreAddCoreCallbacks(struct mCore* core, const struct mCoreCallbacks* coreCallbacks) {
 	struct GBA* gba = core->board;
 	*mCoreCallbacksListAppend(&gba->coreCallbacks) = *coreCallbacks;
+}
+
+static void _GBACoreRemoveCoreCallbacks(struct mCore* core, const struct mCoreCallbacks* coreCallbacks) {
+	struct GBA* gba = core->board;
+	size_t i;
+
+	for (i = 0; i < mCoreCallbacksListSize(&gba->coreCallbacks); ++i) {
+		if (memcmp(mCoreCallbacksListGetConstPointer(&gba->coreCallbacks, i), coreCallbacks, sizeof(*coreCallbacks)) == 0) {
+			mCoreCallbacksListShift(&gba->coreCallbacks, i, 1);
+			break;
+		}
+	}
 }
 
 static void _GBACoreClearCoreCallbacks(struct mCore* core) {
@@ -1654,6 +1666,7 @@ struct mCore* GBACoreCreate(void) {
 	core->setAudioBufferSize = _GBACoreSetAudioBufferSize;
 	core->getAudioBufferSize = _GBACoreGetAudioBufferSize;
 	core->addCoreCallbacks = _GBACoreAddCoreCallbacks;
+	core->removeCoreCallbacks = _GBACoreRemoveCoreCallbacks;
 	core->clearCoreCallbacks = _GBACoreClearCoreCallbacks;
 	core->setAVStream = _GBACoreSetAVStream;
 	core->isROM = GBAIsROM;

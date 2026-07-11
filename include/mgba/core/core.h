@@ -80,7 +80,8 @@ struct mCore {
 	void (*setAudioBufferSize)(struct mCore*, size_t samples);
 	size_t (*getAudioBufferSize)(struct mCore*);
 
-	void (*addCoreCallbacks)(struct mCore*, struct mCoreCallbacks*);
+	void (*addCoreCallbacks)(struct mCore*, const struct mCoreCallbacks*);
+	void (*removeCoreCallbacks)(struct mCore*, const struct mCoreCallbacks*);
 	void (*clearCoreCallbacks)(struct mCore*);
 	void (*setAVStream)(struct mCore*, struct mAVStream*);
 
