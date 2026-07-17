@@ -1513,6 +1513,20 @@ void mScriptContextDetachCore(struct mScriptContext* context) {
 	if (adapter->rotationCbTable) {
 		mScriptValueDeref(adapter->rotationCbTable);
 	}
+
+	struct mCoreCallbacks callbacks = {
+		.videoFrameEnded = mCoreCallback(frame),
+		.coreCrashed = mCoreCallback(crashed),
+		.sleep = mCoreCallback(sleep),
+		.shutdown = mCoreCallback(stop),
+		.keysRead = mCoreCallback(keysRead),
+		.savedataUpdated = mCoreCallback(savedataUpdated),
+		.alarm = mCoreCallback(alarm),
+		.memoryBlocksChanged = mCoreCallback(memoryBlocksChanged),
+		.context = context
+	};
+	core->removeCoreCallbacks(core, &callbacks);
+
 #ifdef M_CORE_GBA
 	if (core->platform(core) == mPLATFORM_GBA) {
 		core->setPeripheral(core, mPERIPH_GBA_LUMINANCE, adapter->oldLuminance);
