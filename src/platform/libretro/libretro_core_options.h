@@ -344,6 +344,7 @@ struct retro_core_options_v2 *options_intl[RETRO_LANGUAGE_LAST] = {
    &options_he,      /* RETRO_LANGUAGE_HEBREW */
    &options_ast,     /* RETRO_LANGUAGE_ASTURIAN */
    &options_fi,      /* RETRO_LANGUAGE_FINNISH */
+   &options_ro,      /* RETRO_LANGUAGE_ROMANIAN */
 };
 #endif
 

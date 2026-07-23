@@ -1,4 +1,5 @@
 /* Copyright (c) 2013-2015 Jeffrey Pfau
+ * Copyright (c) 2026 Epilogue
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -31,15 +32,15 @@ static const struct GBACartridgeOverride _overrides[] = {
 	{ "U32P", GBA_SAVEDATA_EEPROM, HW_RTC | HW_LIGHT_SENSOR, GBA_IDLE_LOOP_NONE },
 
 	// Crash Bandicoot 2 - N-Tranced
-	{ "AC8J", GBA_SAVEDATA_EEPROM, HW_NONE, GBA_IDLE_LOOP_NONE },
-	{ "AC8E", GBA_SAVEDATA_EEPROM, HW_NONE, GBA_IDLE_LOOP_NONE },
-	{ "AC8P", GBA_SAVEDATA_EEPROM, HW_NONE, GBA_IDLE_LOOP_NONE },
+	{ "AC8J", GBA_SAVEDATA_EEPROM512, HW_NONE, GBA_IDLE_LOOP_NONE },
+	{ "AC8E", GBA_SAVEDATA_EEPROM512, HW_NONE, GBA_IDLE_LOOP_NONE },
+	{ "AC8P", GBA_SAVEDATA_EEPROM512, HW_NONE, GBA_IDLE_LOOP_NONE },
 
 	// DigiCommunication Nyo - Datou! Black Gemagema Dan
 	{ "BDKJ", GBA_SAVEDATA_EEPROM, HW_NONE, GBA_IDLE_LOOP_NONE },
 
 	// Dragon Ball Z - The Legacy of Goku
-	{ "ALGP", GBA_SAVEDATA_EEPROM, HW_NONE, GBA_IDLE_LOOP_NONE },
+	{ "ALGP", GBA_SAVEDATA_EEPROM512, HW_NONE, GBA_IDLE_LOOP_NONE },
 
 	// Dragon Ball Z - The Legacy of Goku II
 	{ "ALFJ", GBA_SAVEDATA_EEPROM, HW_NONE, GBA_IDLE_LOOP_NONE },
@@ -47,8 +48,8 @@ static const struct GBACartridgeOverride _overrides[] = {
 	{ "ALFP", GBA_SAVEDATA_EEPROM, HW_NONE, GBA_IDLE_LOOP_NONE },
 
 	// Dragon Ball Z - Taiketsu
-	{ "BDBE", GBA_SAVEDATA_EEPROM, HW_NONE, GBA_IDLE_LOOP_NONE },
-	{ "BDBP", GBA_SAVEDATA_EEPROM, HW_NONE, GBA_IDLE_LOOP_NONE },
+	{ "BDBE", GBA_SAVEDATA_EEPROM512, HW_NONE, GBA_IDLE_LOOP_NONE },
+	{ "BDBP", GBA_SAVEDATA_EEPROM512, HW_NONE, GBA_IDLE_LOOP_NONE },
 
 	// Drill Dozer
 	{ "V49J", GBA_SAVEDATA_SRAM, HW_RUMBLE, GBA_IDLE_LOOP_NONE },
@@ -80,7 +81,7 @@ static const struct GBACartridgeOverride _overrides[] = {
 	{ "AGFE", GBA_SAVEDATA_FLASH512, HW_NONE, 0x801353A },
 
 	// Koro Koro Puzzle - Happy Panechu!
-	{ "KHPJ", GBA_SAVEDATA_EEPROM, HW_TILT, GBA_IDLE_LOOP_NONE },
+	{ "KHPJ", GBA_SAVEDATA_EEPROM512, HW_TILT, GBA_IDLE_LOOP_NONE },
 
 	// Legendz - Yomigaeru Shiren no Shima
 	{ "BLJJ", GBA_SAVEDATA_FLASH512, HW_RTC, GBA_IDLE_LOOP_NONE },
@@ -96,7 +97,7 @@ static const struct GBACartridgeOverride _overrides[] = {
 	{ "AZCE", GBA_SAVEDATA_SRAM, HW_NONE, 0x80004E8 },
 
 	// Metal Slug Advance
-	{ "BSME", GBA_SAVEDATA_EEPROM, HW_NONE, 0x8000290 },
+	{ "BSME", GBA_SAVEDATA_EEPROM512, HW_NONE, 0x8000290 },
 
 	// Pokemon Ruby
 	{ "AXVJ", GBA_SAVEDATA_FLASH1M, HW_RTC, GBA_IDLE_LOOP_NONE },
@@ -151,8 +152,8 @@ static const struct GBACartridgeOverride _overrides[] = {
 	{ "BR4J", GBA_SAVEDATA_FLASH512, HW_RTC, GBA_IDLE_LOOP_NONE },
 
 	// Rocky
-	{ "AR8E", GBA_SAVEDATA_EEPROM, HW_NONE, GBA_IDLE_LOOP_NONE },
-	{ "AROP", GBA_SAVEDATA_EEPROM, HW_NONE, GBA_IDLE_LOOP_NONE },
+	{ "AR8E", GBA_SAVEDATA_EEPROM512, HW_NONE, GBA_IDLE_LOOP_NONE },
+	{ "AROP", GBA_SAVEDATA_EEPROM512, HW_NONE, GBA_IDLE_LOOP_NONE },
 
 	// Sennen Kazoku
 	{ "BKAJ", GBA_SAVEDATA_FLASH1M, HW_RTC, GBA_IDLE_LOOP_NONE },
@@ -180,14 +181,14 @@ static const struct GBACartridgeOverride _overrides[] = {
 	{ "AX4P", GBA_SAVEDATA_FLASH1M, HW_NONE, 0x800072A },
 
 	// Super Monkey Ball Jr.
-	{ "ALUE", GBA_SAVEDATA_EEPROM, HW_NONE, GBA_IDLE_LOOP_NONE },
-	{ "ALUP", GBA_SAVEDATA_EEPROM, HW_NONE, GBA_IDLE_LOOP_NONE },
+	{ "ALUE", GBA_SAVEDATA_EEPROM512, HW_NONE, GBA_IDLE_LOOP_NONE },
+	{ "ALUP", GBA_SAVEDATA_EEPROM512, HW_NONE, GBA_IDLE_LOOP_NONE },
 
 	// Top Gun - Combat Zones
 	{ "A2YE", GBA_SAVEDATA_FORCE_NONE, HW_NONE, GBA_IDLE_LOOP_NONE },
 
 	// Ueki no Housoku - Jingi Sakuretsu! Nouryokusha Battle
-	{ "BUHJ", GBA_SAVEDATA_EEPROM, HW_NONE, GBA_IDLE_LOOP_NONE },
+	{ "BUHJ", GBA_SAVEDATA_EEPROM512, HW_NONE, GBA_IDLE_LOOP_NONE },
 
 	// Wario Ware Twisted
 	{ "RZWJ", GBA_SAVEDATA_SRAM, HW_RUMBLE | HW_GYRO, GBA_IDLE_LOOP_NONE },
@@ -195,12 +196,20 @@ static const struct GBACartridgeOverride _overrides[] = {
 	{ "RZWP", GBA_SAVEDATA_SRAM, HW_RUMBLE | HW_GYRO, GBA_IDLE_LOOP_NONE },
 
 	// Yoshi's Universal Gravitation
-	{ "KYGJ", GBA_SAVEDATA_EEPROM, HW_TILT, GBA_IDLE_LOOP_NONE },
-	{ "KYGE", GBA_SAVEDATA_EEPROM, HW_TILT, GBA_IDLE_LOOP_NONE },
-	{ "KYGP", GBA_SAVEDATA_EEPROM, HW_TILT, GBA_IDLE_LOOP_NONE },
+	{ "KYGJ", GBA_SAVEDATA_EEPROM512, HW_TILT, GBA_IDLE_LOOP_NONE },
+	{ "KYGE", GBA_SAVEDATA_EEPROM512, HW_TILT, GBA_IDLE_LOOP_NONE },
+	{ "KYGP", GBA_SAVEDATA_EEPROM512, HW_TILT, GBA_IDLE_LOOP_NONE },
 
 	// Aging cartridge
-	{ "TCHK", GBA_SAVEDATA_EEPROM, HW_NONE, GBA_IDLE_LOOP_NONE, },
+	{ "TCHK", GBA_SAVEDATA_EEPROM512, HW_NONE, GBA_IDLE_LOOP_NONE, },
+
+	// Classic NES Series / Famicom Mini titles with 8KB EEPROM
+	{ "FLBE", GBA_SAVEDATA_EEPROM, HW_NONE, GBA_IDLE_LOOP_NONE },
+	{ "FLBJ", GBA_SAVEDATA_EEPROM, HW_NONE, GBA_IDLE_LOOP_NONE },
+	{ "FMRJ", GBA_SAVEDATA_EEPROM, HW_NONE, GBA_IDLE_LOOP_NONE },
+	{ "FPTJ", GBA_SAVEDATA_EEPROM, HW_NONE, GBA_IDLE_LOOP_NONE },
+	{ "FSRJ", GBA_SAVEDATA_EEPROM, HW_NONE, GBA_IDLE_LOOP_NONE },
+	{ "FZLE", GBA_SAVEDATA_EEPROM, HW_NONE, GBA_IDLE_LOOP_NONE },
 
 	{ { 0, 0, 0, 0 }, 0, 0, GBA_IDLE_LOOP_NONE, false }
 };
@@ -277,7 +286,7 @@ bool GBAOverrideFind(const struct Configuration* config, struct GBACartridgeOver
 	}
 	if (!found && override->id[0] == 'F') {
 		// Classic NES Series
-		override->savetype = GBA_SAVEDATA_EEPROM;
+		override->savetype = GBA_SAVEDATA_EEPROM512;
 		found = true;
 	}
 

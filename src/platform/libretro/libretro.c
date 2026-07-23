@@ -1,4 +1,5 @@
 /* Copyright (c) 2013-2015 Jeffrey Pfau
+ * Copyright (c) 2026 Epilogue
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -17,16 +18,24 @@
 #include <mgba/internal/gb/gb.h>
 #include <mgba/internal/gb/mbc.h>
 #include <mgba/internal/gb/overrides.h>
+#include <mgba/internal/gb/sio/link-netplay.h>
 #endif
 #ifdef M_CORE_GBA
 #include <mgba/gba/core.h>
 #include <mgba/gba/interface.h>
 #include <mgba/internal/gba/gba.h>
+#include <mgba/internal/gba/sio/rfu-netplay.h>
 #endif
 #include <mgba-util/memory.h>
 #include <mgba-util/vfs.h>
 
 #include "libretro_core_options.h"
+
+#define RETRO_ENVIRONMENT_SET_SAVE_UPDATED_CALLBACK (880 | RETRO_ENVIRONMENT_EXPERIMENTAL)
+typedef void (RETRO_CALLCONV *retro_save_updated_callback_t)(void* context);
+struct retro_save_updated_callback {
+	retro_save_updated_callback_t callback;
+};
 
 #define GB_SAMPLES 512
 /* An alpha factor of 1/180 is *somewhat* equivalent
@@ -48,6 +57,7 @@ static retro_log_printf_t logCallback;
 static retro_set_rumble_state_t rumbleCallback;
 static retro_sensor_get_input_t sensorGetCallback;
 static retro_set_sensor_state_t sensorStateCallback;
+static struct retro_save_updated_callback saveUpdatedCallback;
 
 static void GBARetroLog(struct mLogger* logger, int category, enum mLogLevel level, const char* format, va_list args);
 
@@ -65,6 +75,31 @@ static int32_t _readTiltX(struct mRotationSource* source);
 static int32_t _readTiltY(struct mRotationSource* source);
 static int32_t _readGyroZ(struct mRotationSource* source);
 
+#if defined(M_CORE_GB) || defined(M_CORE_GBA)
+static void _mgbaNetplayStart(uint16_t clientId, retro_netpacket_send_t sendFn, retro_netpacket_poll_receive_t pollFn);
+static void _mgbaNetplayReceive(const void* buf, size_t len, uint16_t clientId);
+static void _mgbaNetplayStop(void);
+static void _mgbaNetplayDisconnected(uint16_t clientId);
+#endif
+
+#ifdef M_CORE_GB
+static void _gbLinkNetplaySend(void* context, int flags, const void* data, size_t len, uint16_t clientId);
+static void _gbLinkNetplayPollReceive(void* context);
+static void _gbLinkNetplayStart(uint16_t clientId, retro_netpacket_send_t sendFn, retro_netpacket_poll_receive_t pollFn);
+static void _gbLinkNetplayReceive(const void* buf, size_t len, uint16_t clientId);
+static void _gbLinkNetplayStop(void);
+static void _gbLinkNetplayDisconnected(uint16_t clientId);
+#endif
+
+#ifdef M_CORE_GBA
+static void _gbaRfuNetplaySend(void* context, int flags, const void* data, size_t len, uint16_t clientId);
+static void _gbaRfuNetplayPollReceive(void* context);
+static void _gbaRfuNetplayStart(uint16_t clientId, retro_netpacket_send_t sendFn, retro_netpacket_poll_receive_t pollFn);
+static void _gbaRfuNetplayReceive(const void* buf, size_t len, uint16_t clientId);
+static void _gbaRfuNetplayStop(void);
+static void _gbaRfuNetplayDisconnected(uint16_t clientId);
+#endif
+
 static struct mCore* core;
 static mColor* outputBuffer = NULL;
 static int16_t *audioSampleBuffer = NULL;
@@ -76,6 +111,32 @@ static void* savedata;
 static struct mAVStream stream;
 static bool sensorsInitDone;
 static bool rumbleInitDone;
+
+#ifdef M_CORE_GB
+static struct GBSIONetplayNode gbLinkNetplayNode;
+static retro_netpacket_send_t gbLinkNetplaySendFn;
+static retro_netpacket_poll_receive_t gbLinkNetplayPollReceiveFn;
+static const struct retro_epilogue_serial_interface* gbLinkSerialInterface;
+static void* gbLinkSerialRuntime;
+#endif
+#ifdef M_CORE_GBA
+static struct GBASIORFUNetplayNode gbaRfuNetplayNode;
+static retro_netpacket_send_t gbaRfuNetplaySendFn;
+static retro_netpacket_poll_receive_t gbaRfuNetplayPollReceiveFn;
+static const struct retro_epilogue_serial_interface* gbaRfuSerialInterface;
+static void* gbaRfuSerialRuntime;
+#endif
+#if defined(M_CORE_GB) || defined(M_CORE_GBA)
+static struct retro_netpacket_callback mgbaNetplayCallback = {
+	_mgbaNetplayStart,
+	_mgbaNetplayReceive,
+	_mgbaNetplayStop,
+	NULL,
+	NULL,
+	_mgbaNetplayDisconnected,
+	NULL,
+};
+#endif
 static struct mRumbleIntegrator rumble;
 static struct GBALuminanceSource lux;
 static struct mRotationSource rotation;
@@ -341,6 +402,59 @@ static void _reloadSettings(void) {
 	mCoreLoadConfig(core);
 }
 
+#ifdef M_CORE_GBA
+static struct GBASavedataRTCBuffer rtcExchangeBuffer;
+
+static uint8_t _unBCD(uint8_t byte) {
+	return (byte >> 4) * 10 + (byte & 0xF);
+}
+
+static struct GBA* _gbaWithRtc(void) {
+	if (!core || core->platform(core) != mPLATFORM_GBA) {
+		return NULL;
+	}
+	struct GBA* gba = core->board;
+	return (gba->memory.hw.devices & HW_RTC) ? gba : NULL;
+}
+
+static void _syncRtcExchangeBuffer(void) {
+	struct GBA* gba = _gbaWithRtc();
+	if (!gba) {
+		return;
+	}
+	memcpy(rtcExchangeBuffer.time, gba->memory.hw.rtc.time, sizeof(rtcExchangeBuffer.time));
+	rtcExchangeBuffer.control = gba->memory.hw.rtc.control;
+	STORE_64LE(gba->memory.hw.rtc.lastLatch, 0, &rtcExchangeBuffer.lastLatch);
+}
+
+static void _restoreRtcFromExchangeBuffer(void) {
+	struct GBA* gba = _gbaWithRtc();
+	if (!gba) {
+		return;
+	}
+	uint64_t lastLatch;
+	LOAD_64LE(lastLatch, 0, &rtcExchangeBuffer.lastLatch);
+	if (lastLatch == 0) {
+		return;
+	}
+	memcpy(gba->memory.hw.rtc.time, rtcExchangeBuffer.time, sizeof(rtcExchangeBuffer.time));
+	if (rtcExchangeBuffer.control != 1) {
+		gba->memory.hw.rtc.control = rtcExchangeBuffer.control;
+	}
+	gba->memory.hw.rtc.lastLatch = lastLatch;
+
+	struct tm date = {0};
+	date.tm_year = _unBCD(gba->memory.hw.rtc.time[0]) + 100;
+	date.tm_mon  = _unBCD(gba->memory.hw.rtc.time[1]) - 1;
+	date.tm_mday = _unBCD(gba->memory.hw.rtc.time[2]);
+	date.tm_hour = _unBCD(gba->memory.hw.rtc.time[4]);
+	date.tm_min  = _unBCD(gba->memory.hw.rtc.time[5]);
+	date.tm_sec  = _unBCD(gba->memory.hw.rtc.time[6]);
+	date.tm_isdst = -1;
+	gba->memory.hw.rtc.offset = gba->memory.hw.rtc.lastLatch - mktime(&date);
+}
+#endif
+
 static void _doDeferredSetup(void) {
 	// Libretro API doesn't let you know when it's done copying data into the save buffers.
 	// On the off-hand chance that a core actually expects its buffers to be populated when
@@ -350,6 +464,9 @@ static void _doDeferredSetup(void) {
 	if (!core->loadSave(core, save)) {
 		save->close(save);
 	}
+#ifdef M_CORE_GBA
+	_restoreRtcFromExchangeBuffer();
+#endif
 	deferredSetup = false;
 }
 
@@ -510,6 +627,21 @@ void retro_init(void) {
 	imageSource.startRequestImage = _startImage;
 	imageSource.stopRequestImage = _stopImage;
 	imageSource.requestImage = _requestImage;
+
+#ifdef M_CORE_GB
+	gbLinkNetplaySendFn = NULL;
+	gbLinkNetplayPollReceiveFn = NULL;
+	gbLinkSerialInterface = NULL;
+	gbLinkSerialRuntime = NULL;
+	GBSIONetplayNodeCreate(&gbLinkNetplayNode);
+#endif
+#ifdef M_CORE_GBA
+	gbaRfuNetplaySendFn = NULL;
+	gbaRfuNetplayPollReceiveFn = NULL;
+	gbaRfuSerialInterface = NULL;
+	gbaRfuSerialRuntime = NULL;
+	GBASIORFUNetplayNodeCreate(&gbaRfuNetplayNode);
+#endif
 }
 
 void retro_deinit(void) {
@@ -923,6 +1055,9 @@ bool retro_load_game(const struct retro_game_info* game) {
 
 	savedata = anonymousMemoryMap(GBA_SIZE_FLASH1M);
 	memset(savedata, 0xFF, GBA_SIZE_FLASH1M);
+#ifdef M_CORE_GBA
+	memset(&rtcExchangeBuffer, 0, sizeof(rtcExchangeBuffer));
+#endif
 
 	_reloadSettings();
 	core->loadROM(core, rom);
@@ -991,6 +1126,53 @@ bool retro_load_game(const struct retro_game_info* game) {
 	core->reset(core);
 	_setupMaps(core);
 
+#ifdef M_CORE_GB
+	if (core->platform(core) == mPLATFORM_GB) {
+		struct retro_epilogue_serial_interface_query query = {
+			.requested_abi_version = RETRO_EPILOGUE_SERIAL_ABI_VERSION,
+			.serial_interface = NULL,
+		};
+		if (environCallback(RETRO_ENVIRONMENT_GET_EPILOGUE_SERIAL_INTERFACE, &query) &&
+				query.serial_interface && query.serial_interface->abi_version == RETRO_EPILOGUE_SERIAL_ABI_VERSION &&
+				query.serial_interface->size >= sizeof(struct retro_epilogue_serial_interface)) {
+			gbLinkSerialInterface = query.serial_interface;
+			gbLinkSerialRuntime = query.serial_interface->create(RETRO_EPILOGUE_SERIAL_DEVICE_GB_LINK);
+		}
+		if (gbLinkSerialRuntime) {
+			GBSIONetplaySetRuntime(&gbLinkNetplayNode, gbLinkSerialInterface, gbLinkSerialRuntime);
+			GBSIOSetDriver(&((struct GB*) core->board)->sio, &gbLinkNetplayNode.d);
+			mgbaNetplayCallback.protocol_version = gbLinkSerialInterface->protocol_version(gbLinkSerialRuntime);
+			environCallback(RETRO_ENVIRONMENT_SET_NETPACKET_INTERFACE, (void*) &mgbaNetplayCallback);
+		}
+	}
+#endif
+#ifdef M_CORE_GBA
+	if (core->platform(core) == mPLATFORM_GBA) {
+		struct retro_epilogue_serial_interface_query query = {
+			.requested_abi_version = RETRO_EPILOGUE_SERIAL_ABI_VERSION,
+			.serial_interface = NULL,
+		};
+		if (environCallback(RETRO_ENVIRONMENT_GET_EPILOGUE_SERIAL_INTERFACE, &query) &&
+				query.serial_interface && query.serial_interface->abi_version == RETRO_EPILOGUE_SERIAL_ABI_VERSION &&
+				query.serial_interface->size >= sizeof(struct retro_epilogue_serial_interface)) {
+			gbaRfuSerialInterface = query.serial_interface;
+			gbaRfuSerialRuntime = query.serial_interface->create(RETRO_EPILOGUE_SERIAL_DEVICE_GBA_RFU);
+		}
+		if (gbaRfuSerialRuntime) {
+			GBASIORFUNetplaySetRuntime(&gbaRfuNetplayNode, gbaRfuSerialInterface, gbaRfuSerialRuntime);
+			GBASIOSetDriver(&((struct GBA*) core->board)->sio, &gbaRfuNetplayNode.d);
+			mgbaNetplayCallback.protocol_version = gbaRfuSerialInterface->protocol_version(gbaRfuSerialRuntime);
+			environCallback(RETRO_ENVIRONMENT_SET_NETPACKET_INTERFACE, (void*) &mgbaNetplayCallback);
+		}
+	}
+#endif
+
+	if (environCallback(RETRO_ENVIRONMENT_SET_SAVE_UPDATED_CALLBACK, &saveUpdatedCallback)) {
+		struct mCoreCallbacks callbacks = {0};
+		callbacks.savedataUpdated = saveUpdatedCallback.callback;
+		core->addCoreCallbacks(core, &callbacks);
+	}
+
 	return true;
 }
 
@@ -998,8 +1180,39 @@ void retro_unload_game(void) {
 	if (!core) {
 		return;
 	}
+#ifdef M_CORE_GB
+	if (core->platform(core) == mPLATFORM_GB) {
+		if (gbLinkSerialRuntime) {
+			_gbLinkNetplayStop();
+			environCallback(RETRO_ENVIRONMENT_SET_NETPACKET_INTERFACE, NULL);
+		}
+		GBSIOSetDriver(&((struct GB*) core->board)->sio, NULL);
+		GBSIONetplaySetRuntime(&gbLinkNetplayNode, NULL, NULL);
+		if (gbLinkSerialRuntime) {
+			gbLinkSerialInterface->destroy(gbLinkSerialRuntime);
+			gbLinkSerialRuntime = NULL;
+			gbLinkSerialInterface = NULL;
+		}
+	}
+#endif
+#ifdef M_CORE_GBA
+	if (core->platform(core) == mPLATFORM_GBA) {
+		if (gbaRfuSerialRuntime) {
+			_gbaRfuNetplayStop();
+			environCallback(RETRO_ENVIRONMENT_SET_NETPACKET_INTERFACE, NULL);
+		}
+		GBASIOSetDriver(&((struct GBA*) core->board)->sio, NULL);
+		GBASIORFUNetplaySetRuntime(&gbaRfuNetplayNode, NULL, NULL);
+		if (gbaRfuSerialRuntime) {
+			gbaRfuSerialInterface->destroy(gbaRfuSerialRuntime);
+			gbaRfuSerialRuntime = NULL;
+			gbaRfuSerialInterface = NULL;
+		}
+	}
+#endif
 	mCoreConfigDeinit(&core->config);
 	core->deinit(core);
+	core = NULL;
 	mappedMemoryFree(data, dataSize);
 	data = 0;
 	mappedMemoryFree(savedata, GBA_SIZE_FLASH1M);
@@ -1042,6 +1255,17 @@ bool retro_unserialize(const void* data, size_t size) {
 	struct VFile* vfm = VFileFromConstMemory(data, size);
 	bool success = mCoreLoadStateNamed(core, vfm, SAVESTATE_RTC);
 	vfm->close(vfm);
+#ifdef M_CORE_GB
+	if (success) {
+		GBSIONetplayEnsurePolling(&gbLinkNetplayNode);
+	}
+#endif
+#ifdef M_CORE_GBA
+	if (success) {
+		_syncRtcExchangeBuffer();
+		GBASIORFUNetplayEnsurePolling(&gbaRfuNetplayNode);
+	}
+#endif
 	return success;
 }
 
@@ -1130,6 +1354,14 @@ void* retro_get_memory_data(unsigned id) {
 		return savedata;
 	case RETRO_MEMORY_RTC:
 		switch (core->platform(core)) {
+#ifdef M_CORE_GBA
+		case mPLATFORM_GBA:
+			if (!_gbaWithRtc()) {
+				return NULL;
+			}
+			_syncRtcExchangeBuffer();
+			return &rtcExchangeBuffer;
+#endif
 #ifdef M_CORE_GB
 		case mPLATFORM_GB:
 			switch (((struct GB*) core->board)->memory.mbcType) {
@@ -1172,6 +1404,10 @@ size_t retro_get_memory_size(unsigned id) {
 		break;
 	case RETRO_MEMORY_RTC:
 		switch (core->platform(core)) {
+#ifdef M_CORE_GBA
+		case mPLATFORM_GBA:
+			return _gbaWithRtc() ? sizeof(rtcExchangeBuffer) : 0;
+#endif
 #ifdef M_CORE_GB
 		case mPLATFORM_GB:
 			switch (((struct GB*) core->board)->memory.mbcType) {
@@ -1223,6 +1459,8 @@ void GBARetroLog(struct mLogger* logger, int category, enum mLogLevel level, con
 	case mLOG_DEBUG:
 		retroLevel = RETRO_LOG_DEBUG;
 		break;
+	case mLOG_ALL:
+		break;
 	}
 #ifdef NDEBUG
 	static int biosCat = -1;
@@ -1251,6 +1489,7 @@ static void _postAudioBuffer(struct mAVStream* stream, struct mAudioBuffer* buff
 
 static void _audioRateChanged(struct mAVStream* stream, unsigned rate) {
 	UNUSED(stream);
+	UNUSED(rate);
 	struct retro_system_av_info info;
 	retro_get_system_av_info(&info);
 	environCallback(RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO, &info);
@@ -1412,3 +1651,157 @@ static int32_t _readGyroZ(struct mRotationSource* source) {
 	UNUSED(source);
 	return gyroZ;
 }
+
+#ifdef M_CORE_GB
+static void _gbLinkNetplaySend(void* context, int flags, const void* data, size_t len, uint16_t clientId) {
+	UNUSED(context);
+	if (gbLinkNetplaySendFn) {
+		gbLinkNetplaySendFn(flags, data, len, clientId);
+	}
+}
+
+static void _gbLinkNetplayPollReceive(void* context) {
+	UNUSED(context);
+	if (gbLinkNetplayPollReceiveFn) {
+		gbLinkNetplayPollReceiveFn();
+	}
+}
+
+static void _gbLinkNetplayStart(uint16_t clientId, retro_netpacket_send_t sendFn, retro_netpacket_poll_receive_t pollFn) {
+	gbLinkNetplaySendFn = sendFn;
+	gbLinkNetplayPollReceiveFn = pollFn;
+	GBSIONetplaySetSessionActive(&gbLinkNetplayNode, true);
+	struct retro_epilogue_serial_transport transport = {
+		.context = NULL,
+		.send = _gbLinkNetplaySend,
+		.poll_receive = _gbLinkNetplayPollReceive,
+	};
+	GBSIONetplayApplyAction(&gbLinkNetplayNode,
+		gbLinkSerialInterface->session_start(gbLinkSerialRuntime, clientId, &transport));
+}
+
+static void _gbLinkNetplayReceive(const void* buf, size_t len, uint16_t clientId) {
+	GBSIONetplayApplyAction(&gbLinkNetplayNode,
+		gbLinkSerialInterface->receive(gbLinkSerialRuntime, buf, len, clientId));
+}
+
+static void _gbLinkNetplayStop(void) {
+	GBSIONetplayApplyAction(&gbLinkNetplayNode,
+		gbLinkSerialInterface->session_stop(gbLinkSerialRuntime));
+	gbLinkNetplaySendFn = NULL;
+	gbLinkNetplayPollReceiveFn = NULL;
+	GBSIONetplaySetSessionActive(&gbLinkNetplayNode, false);
+}
+
+static void _gbLinkNetplayDisconnected(uint16_t clientId) {
+	GBSIONetplayApplyAction(&gbLinkNetplayNode,
+		gbLinkSerialInterface->peer_disconnected(gbLinkSerialRuntime, clientId));
+}
+#endif
+
+#ifdef M_CORE_GBA
+static void _gbaRfuNetplaySend(void* context, int flags, const void* data, size_t len, uint16_t clientId) {
+	UNUSED(context);
+	if (gbaRfuNetplaySendFn) {
+		gbaRfuNetplaySendFn(flags, data, len, clientId);
+	}
+}
+
+static void _gbaRfuNetplayPollReceive(void* context) {
+	UNUSED(context);
+	if (gbaRfuNetplayPollReceiveFn) {
+		gbaRfuNetplayPollReceiveFn();
+	}
+}
+
+static void _gbaRfuNetplayStart(uint16_t clientId, retro_netpacket_send_t sendFn, retro_netpacket_poll_receive_t pollFn) {
+	gbaRfuNetplaySendFn = sendFn;
+	gbaRfuNetplayPollReceiveFn = pollFn;
+	struct retro_epilogue_serial_transport transport = {
+		.context = NULL,
+		.send = _gbaRfuNetplaySend,
+		.poll_receive = _gbaRfuNetplayPollReceive,
+	};
+	GBASIORFUNetplayApplyAction(&gbaRfuNetplayNode,
+		gbaRfuSerialInterface->session_start(gbaRfuSerialRuntime, clientId, &transport));
+}
+
+static void _gbaRfuNetplayReceive(const void* buf, size_t len, uint16_t clientId) {
+	GBASIORFUNetplayApplyAction(&gbaRfuNetplayNode,
+		gbaRfuSerialInterface->receive(gbaRfuSerialRuntime, buf, len, clientId));
+}
+
+static void _gbaRfuNetplayStop(void) {
+	GBASIORFUNetplayApplyAction(&gbaRfuNetplayNode,
+		gbaRfuSerialInterface->session_stop(gbaRfuSerialRuntime));
+	gbaRfuNetplaySendFn = NULL;
+	gbaRfuNetplayPollReceiveFn = NULL;
+}
+
+static void _gbaRfuNetplayDisconnected(uint16_t clientId) {
+	GBASIORFUNetplayApplyAction(&gbaRfuNetplayNode,
+		gbaRfuSerialInterface->peer_disconnected(gbaRfuSerialRuntime, clientId));
+}
+#endif
+
+#if defined(M_CORE_GB) || defined(M_CORE_GBA)
+static void _mgbaNetplayStart(uint16_t clientId, retro_netpacket_send_t sendFn, retro_netpacket_poll_receive_t pollFn) {
+#ifdef M_CORE_GB
+	if (gbLinkSerialRuntime) {
+		_gbLinkNetplayStart(clientId, sendFn, pollFn);
+		return;
+	}
+#endif
+#ifdef M_CORE_GBA
+	if (gbaRfuSerialRuntime) {
+		_gbaRfuNetplayStart(clientId, sendFn, pollFn);
+		return;
+	}
+#endif
+}
+
+static void _mgbaNetplayReceive(const void* buf, size_t len, uint16_t clientId) {
+#ifdef M_CORE_GB
+	if (gbLinkSerialRuntime) {
+		_gbLinkNetplayReceive(buf, len, clientId);
+		return;
+	}
+#endif
+#ifdef M_CORE_GBA
+	if (gbaRfuSerialRuntime) {
+		_gbaRfuNetplayReceive(buf, len, clientId);
+		return;
+	}
+#endif
+}
+
+static void _mgbaNetplayStop(void) {
+#ifdef M_CORE_GB
+	if (gbLinkSerialRuntime) {
+		_gbLinkNetplayStop();
+		return;
+	}
+#endif
+#ifdef M_CORE_GBA
+	if (gbaRfuSerialRuntime) {
+		_gbaRfuNetplayStop();
+		return;
+	}
+#endif
+}
+
+static void _mgbaNetplayDisconnected(uint16_t clientId) {
+#ifdef M_CORE_GB
+	if (gbLinkSerialRuntime) {
+		_gbLinkNetplayDisconnected(clientId);
+		return;
+	}
+#endif
+#ifdef M_CORE_GBA
+	if (gbaRfuSerialRuntime) {
+		_gbaRfuNetplayDisconnected(clientId);
+		return;
+	}
+#endif
+}
+#endif

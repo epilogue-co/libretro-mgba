@@ -1,4 +1,5 @@
 /* Copyright (c) 2013-2016 Jeffrey Pfau
+ * Copyright (c) 2026 Epilogue
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -8,7 +9,7 @@
 #include <mgba/internal/defines.h>
 #include <mgba/internal/gb/gb.h>
 
-static void _GBPocketCamCapture(struct GBMemory*);
+static void _GBPocketCamCaptureRaw(struct GBMemory*);
 
 void _GBPocketCam(struct GB* gb, uint16_t address, uint8_t value) {
 	struct GBMemory* memory = &gb->memory;
@@ -50,7 +51,7 @@ void _GBPocketCam(struct GB* gb, uint16_t address, uint8_t value) {
 		if (address == 0 && value & 1) {
 			value &= 6; // TODO: Timing
 			gb->sramDirty |= mSAVEDATA_DIRT_NEW;
-			_GBPocketCamCapture(memory);
+			_GBPocketCamCaptureRaw(memory);
 		}
 		if (address < sizeof(memory->mbcState.pocketCam.registers)) {
 			memory->mbcState.pocketCam.registers[address] = value;
@@ -136,6 +137,42 @@ void _GBPocketCamCapture(struct GBMemory* memory) {
 			uint16_t existing;
 			LOAD_16LE(existing, coord + 0x100, memory->sram);
 			existing |= gray << (7 - (x & 7));
+			STORE_16LE(existing, coord + 0x100, memory->sram);
+		}
+	}
+}
+
+void _GBPocketCamCaptureRaw(struct GBMemory* memory) {
+	if (!memory->cam) {
+		return;
+	}
+
+	const void* image = NULL;
+	size_t stride;
+	enum mColorFormat format;
+	memory->cam->requestImage(memory->cam, &image, &stride, &format);
+	if (!image) {
+		return;
+	}
+
+	memset(&memory->sram[0x100], 0, GBCAM_HEIGHT * GBCAM_WIDTH / 4);
+	const uint32_t* pixels = image;
+	for (size_t y = 0; y < GBCAM_HEIGHT; ++y) {
+		for (size_t x = 0; x < GBCAM_WIDTH; ++x) {
+			uint8_t gray = (pixels[y * stride + x] >> 16) & 0xFF;
+			uint16_t mapped;
+			switch (gray) {
+			case 0:   mapped = 0x101; break;
+			case 85:  mapped = 0x100; break;
+			case 170: mapped = 0x001; break;
+			case 255: mapped = 0x000; break;
+			default:  mapped = 0x000; break;
+			}
+
+			int coord = (((x >> 3) & 0xF) * 8 + (y & 0x7)) * 2 + (y & ~0x7) * 0x20;
+			uint16_t existing;
+			LOAD_16LE(existing, coord + 0x100, memory->sram);
+			existing |= mapped << (7 - (x & 7));
 			STORE_16LE(existing, coord + 0x100, memory->sram);
 		}
 	}

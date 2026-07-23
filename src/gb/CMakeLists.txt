@@ -19,6 +19,7 @@ set(SOURCE_FILES
 	renderers/cache-set.c
 	renderers/software.c
 	sio.c
+	sio/link-netplay.c
 	timer.c
 	video.c)
 

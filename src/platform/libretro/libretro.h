@@ -283,6 +283,7 @@ enum retro_language
    RETRO_LANGUAGE_HEBREW              = 21,
    RETRO_LANGUAGE_ASTURIAN            = 22,
    RETRO_LANGUAGE_FINNISH             = 23,
+   RETRO_LANGUAGE_ROMANIAN            = 24,
    RETRO_LANGUAGE_LAST,
 
    /* Ensure sizeof(enum) == sizeof(int) */
@@ -1752,6 +1753,59 @@ enum retro_mod
                                             * Allows an implementation to get details on the actual rate
                                             * the frontend is attempting to call retro_run().
                                             */
+
+#define RETRO_ENVIRONMENT_SET_NETPACKET_INTERFACE 78
+                                           /* const struct retro_netpacket_callback * --
+                                            * When set, a core gains control over network packets sent and
+                                            * received during a multiplayer session. This can be used to
+                                            * emulate multiplayer games that were originally played on two
+                                            * or more separate consoles or computers connected together.
+                                            *
+                                            * The frontend will take care of connecting players together,
+                                            * and the core only needs to send the actual data as needed for
+                                            * the emulation, while handshake and connection management happen
+                                            * in the background.
+                                            *
+                                            * When two or more players are connected and this interface has
+                                            * been set, time manipulation features (such as pausing, slow motion,
+                                            * fast forward, rewinding, save state loading, etc.) are disabled to
+                                            * avoid interrupting communication.
+                                            *
+                                            * Should be set in either retro_init or retro_load_game, but not both.
+                                            *
+                                            * When not set, a frontend may use state serialization-based
+                                            * multiplayer, where a deterministic core supporting multiple
+                                            * input devices does not need to take any action on its own.
+                                            */
+
+/* Netpacket flags for retro_netpacket_send_t */
+#define RETRO_NETPACKET_UNRELIABLE  0        /* Packet to be sent unreliable, depending on network quality it might not arrive. */
+#define RETRO_NETPACKET_RELIABLE    (1 << 0) /* Reliable packets are guaranteed to arrive at the target in the order they were sent. */
+#define RETRO_NETPACKET_UNSEQUENCED (1 << 1) /* Packet will not be sequenced with other packets and may arrive out of order. Cannot be set on reliable packets. */
+#define RETRO_NETPACKET_FLUSH_HINT  (1 << 2) /* Request the packet and any previously buffered ones to be sent immediately */
+
+/* Broadcast client_id for retro_netpacket_send_t */
+#define RETRO_NETPACKET_BROADCAST 0xFFFF
+
+typedef void (RETRO_CALLCONV *retro_netpacket_send_t)(int flags, const void* buf, size_t len, uint16_t client_id);
+typedef void (RETRO_CALLCONV *retro_netpacket_poll_receive_t)(void);
+typedef void (RETRO_CALLCONV *retro_netpacket_start_t)(uint16_t client_id, retro_netpacket_send_t send_fn, retro_netpacket_poll_receive_t poll_receive_fn);
+typedef void (RETRO_CALLCONV *retro_netpacket_receive_t)(const void* buf, size_t len, uint16_t client_id);
+typedef void (RETRO_CALLCONV *retro_netpacket_stop_t)(void);
+typedef void (RETRO_CALLCONV *retro_netpacket_poll_t)(void);
+typedef bool (RETRO_CALLCONV *retro_netpacket_connected_t)(uint16_t client_id);
+typedef void (RETRO_CALLCONV *retro_netpacket_disconnected_t)(uint16_t client_id);
+
+struct retro_netpacket_callback
+{
+   retro_netpacket_start_t        start;
+   retro_netpacket_receive_t      receive;
+   retro_netpacket_stop_t         stop;         /* Optional - may be NULL */
+   retro_netpacket_poll_t         poll;         /* Optional - may be NULL */
+   retro_netpacket_connected_t    connected;    /* Optional - may be NULL */
+   retro_netpacket_disconnected_t disconnected; /* Optional - may be NULL */
+   const char* protocol_version; /* Optional - if not NULL will be used instead of core version to decide if communication is compatible */
+};
 
 /* VFS functionality */
 
